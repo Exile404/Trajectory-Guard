@@ -1,0 +1,45 @@
+# venv
+trajectory-env/
+.venv/
+venv/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# caches
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# secrets and env
+.env
+.env.*
+!.env.example
+
+# editors and OS
+.vscode/
+.idea/
+.DS_Store
+
+# logged data and model checkpoints (large)
+predictor/data/*
+!predictor/data/.gitkeep
+predictor/**/checkpoints/
+*.safetensors
+*.bin
+*.gguf
+*.pt
+*.ckpt
+
+# experiment logs
+wandb/
+*.log
+
+# local only spec (not for the public repo)
+spec.md
