@@ -95,18 +95,23 @@ def diagnose(state: TrajectoryState) -> dict:
 
 
 def repair(state: TrajectoryState) -> dict:
-    llm = get_llm(temperature=0.0)
+    llm = get_llm(temperature=0.3)
+    errs = state.get("error_history", [])
+    recent = errs[-3:]
+    history = "\n".join(f"- {e[:300]}" for e in recent) or "none"
     sys = SystemMessage(content=(
         "You are a coding agent fixing failing code. "
-        "Use the error and failure type to produce a corrected version. "
-        "Return only the full corrected code in a single python block."
+        "Identify the root cause of the failure, then rewrite the FULL corrected function. "
+        "Do not repeat any previous failed approach listed below. "
+        "Return only the corrected code in a single python block, no explanation."
     ))
     msg = HumanMessage(content=(
         f"Task:\n{state['task']}\n\n"
         f"Current code:\n{state.get('code', '')}\n\n"
         f"Failure type: {state.get('failure_type', '')}\n"
-        f"Test output:\n{state.get('test_output', '')}\n\n"
-        "Fix it."
+        f"Recent errors (most recent last):\n{history}\n\n"
+        f"Latest test output:\n{state.get('test_output', '')[:1500]}\n\n"
+        "Return the corrected code."
     ))
     resp = llm.invoke([sys, msg])
     return {

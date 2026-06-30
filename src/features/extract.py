@@ -32,7 +32,14 @@ def compute_features(state: TrajectoryState) -> dict:
 
 def extract_features(state: TrajectoryState) -> dict:
     f = compute_features(state)
-    return {"features": f, "feature_log": [f]}
+    errs = state.get("error_history", [])
+    record = {
+        **f,
+        "raw_code": state.get("code", ""),
+        "raw_last_error": errs[-1] if errs else "",
+        "raw_test_output": state.get("test_output", "")[:2000],
+    }
+    return {"features": f, "feature_log": [record]}
 
 
 if __name__ == "__main__":
