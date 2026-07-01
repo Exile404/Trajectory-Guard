@@ -29,8 +29,9 @@ def humaneval_items(limit):
 
 
 def mbpp_items(limit):
-    ds = load_dataset("google-research-datasets/mbpp", "full")["test"]
-    for i, item in enumerate(ds):
+    ds = load_dataset("google-research-datasets/mbpp", "full")
+    items = list(ds["train"]) + list(ds["test"]) + list(ds["validation"])  # 374+500+90 = 964
+    for i, item in enumerate(items):
         if i >= limit:
             break
         m = re.search(r"assert\s+(\w+)\s*\(", item["test_list"][0])

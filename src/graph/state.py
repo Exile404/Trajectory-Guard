@@ -28,9 +28,10 @@ class TrajectoryState(TypedDict, total=False):
     failure_risk: float                                # predictor score, 0 to 1
     tokens_used: Annotated[int, operator.add]          # cumulative model tokens, for H3 and features
     status: str                                        # running, passed, failed, aborted
+    abort_enabled: bool 
 
-
-def new_state(task: str, test: str = "", task_id: str = "task", max_steps: int = 6) -> TrajectoryState:
+def new_state(task: str, test: str = "", task_id: str = "task", max_steps: int = 6,
+              abort_enabled: bool = False) -> TrajectoryState:
     """Fresh state for one task run: empty accumulators, status running."""
     return TrajectoryState(
         task_id=task_id,
@@ -49,6 +50,7 @@ def new_state(task: str, test: str = "", task_id: str = "task", max_steps: int =
         failure_risk=0.0,
         tokens_used=0,
         status="running",
+        abort_enabled=abort_enabled
     )
 
 

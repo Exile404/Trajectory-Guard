@@ -37,6 +37,11 @@ predictor/**/checkpoints/
 *.pt
 *.ckpt
 
+# predictor artifacts and training output (regenerable via predictor/train_predictor.py)
+*.joblib
+predictor/lora_out/
+unsloth_compiled_cache/
+
 # experiment logs
 wandb/
 *.log

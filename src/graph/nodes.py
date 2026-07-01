@@ -11,6 +11,7 @@ import re
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from graph.state import TrajectoryState
+from models.predictor import get_predictor
 from models.provider import get_llm
 from tools.sandbox import run_with_tests
 
@@ -119,6 +120,22 @@ def repair(state: TrajectoryState) -> dict:
         "step_count": state.get("step_count", 0) + 1,
         "tokens_used": _count_tokens(resp),
     }
+def predict(state: TrajectoryState) -> dict:
+    """Score P(doomed) for the current partial trajectory. Always runs so the
+    risk is logged in both arms; the abort decision itself lives in the edge."""
+    feats = state.get("features") or {}
+    if not feats:
+        return {}
+    try:
+        risk = get_predictor().score(feats)
+    except FileNotFoundError:
+        return {}  # no artifact -> predictor disabled, run continues normally
+    return {"failure_risk": risk}
+
+
+def abort(state: TrajectoryState) -> dict:
+    """Terminal node: predictor judged this run doomed; stop early."""
+    return {"status": "aborted"}
 
 
 if __name__ == "__main__":
