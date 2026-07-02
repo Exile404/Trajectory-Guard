@@ -33,7 +33,7 @@ An honest ablation: a **QLoRA-fine-tuned code LLM** (Qwen2.5-Coder, trained with
 | Orchestration | LangGraph |
 | Tools and prompts | LangChain |
 | Local model (dev) | qwen2.5-coder via Ollama |
-| Hosted model (final) | GLM-5.1 via NVIDIA NIM, or AWS Bedrock |
+| Hosted models (eval) | DeepSeek-V4-Pro (workhorse) + 3 others A/B-tested via NVIDIA NIM; AWS Bedrock (phase 6) |
 | Predictor | scikit-learn logistic regression (shipped) + unsloth LoRA ablation |
 | Sandbox | subprocess with timeout and resource limits |
 | Datasets | HumanEval, MBPP, SWE-bench Lite |
@@ -43,10 +43,10 @@ An honest ablation: a **QLoRA-fine-tuned code LLM** (Qwen2.5-Coder, trained with
 ```
 src/
   graph/      state, nodes, edges, build (the LangGraph machine)
-  tools/      sandbox, test runner, file tools
+  tools/      sandbox, test runner, repo checkout/search tools
   models/     provider (ollama, nim, bedrock switch), predictor
   features/   per step trajectory features
-  eval/       benchmark runner, metrics
+  eval/       benchmark runner, SWE-bench patch agent + report summary
 predictor/    logged trajectories, LoRA training
 results/      tables, figures
 ```
@@ -77,6 +77,14 @@ python predictor/train_predictor.py
 
 # reproduce the abort-policy measurement (H3)
 python predictor/measure_abort.py
+
+# SWE-bench Lite: generate patches (hosted via NIM), score with the official harness
+python -m eval.swebench_agent --repos pallets/flask,psf/requests --limit 24 --use-gold-file \
+  --provider nim --model deepseek-ai/deepseek-v4-pro --max-file-chars 60000 \
+  --out swebench_preds/run.jsonl
+python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Lite \
+  --predictions_path swebench_preds/run.jsonl --max_workers 4 --run_id my-run --cache_level env
+python -m eval.ab_summary v2:deepseek v3:nemotron    # summarize harness reports
 ```
 
 ## Results
@@ -107,6 +115,23 @@ At the conservative threshold the agent cuts **~27% of tokens for a 0.2% pass-ra
 
 Reproduce: `python predictor/baseline.py` (H1), `python predictor/measure_abort.py` (H3).
 
+**SWE-bench Lite (Phase 5) — hosted 4-model A/B.** A deliberately lean one-shot patcher (gold-file context, SEARCH/REPLACE edits, exact + whitespace-tolerant apply) scored by the **official SWE-bench Docker harness** — n=24 tasks across flask / requests / xarray / seaborn / pylint, reasoning-allowed prompt, fresh `run_id` per experiment:
+
+| model (via NVIDIA NIM free tier) | resolved | valid patches | per-attempt rate |
+|---|---|---|---|
+| **DeepSeek-V4-Pro** | **5/24 (21%)** | 22/24 | 23% |
+| **Nemotron-3-Ultra 550B** | **5/24 (21%)** | 19/24 | 26% |
+| Kimi-K2.6 | 4/24 (17%) | 16/24 | 25% |
+| Qwen3-Next-80B | 2/24 (8%) | 13/24 | 15% |
+
+DeepSeek and Nemotron **tie**; per-attempt differences are within noise at n=24, so DeepSeek ships as the workhorse on the dimensions that are not noise: zero API errors across every run, the most format-valid patches, and ~6× less wall-clock than the 550B on a free endpoint. Findings worth defending:
+
+- **A benchmark number = model × scaffold × prompt.** Allowing reasoning in the prompt flipped the ranking (DeepSeek went from last to tied-first). The 8,192-token output cap truncated Nemotron on 4 tasks (verified via `finish_reason`) — reasoning models pay scaffold taxes that leaderboard numbers hide.
+- **Models solve different tasks.** The 4-model union resolves 8/24 (33%) vs any single model's 5/24 — diversity beats model choice at this scale.
+- **The harness caches results by `run_id`** and silently skips already-run instances even if the patch changed. Every experiment gets a fresh `run_id`, or the numbers are fiction.
+
+A local qwen2.5-coder:14b pilot resolved 0/3 — it cannot reliably emit exact-match edits (an Ollama context-truncation bug, since fixed, also contributed).
+
 ## Project status
 
 - [x] Phase 0: scaffold, pinned deps, sandbox runner
@@ -114,8 +139,8 @@ Reproduce: `python predictor/baseline.py` (H1), `python predictor/measure_abort.
 - [x] Phase 2: trajectory feature logging to JSONL
 - [x] Phase 3: failure predictor (feature logreg 0.806 AUROC; LoRA ablation)
 - [x] Phase 4: predict and abort edge (H3: ~27% tokens saved)
-- [ ] Phase 5: scale to SWE-bench Lite
-- [ ] Phase 6: hosted model swap (NIM, Bedrock)
+- [x] Phase 5: SWE-bench Lite via the official harness + hosted 4-model A/B (NIM)
+- [ ] Phase 6: AWS Bedrock backend (third cloud lane)
 
 ## Hypotheses
 

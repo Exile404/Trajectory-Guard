@@ -42,6 +42,12 @@ predictor/**/checkpoints/
 predictor/lora_out/
 unsloth_compiled_cache/
 
+# SWE-bench cloned repos, predictions, harness output (large / regenerable)
+swebench_repos/
+swebench_preds/
+trajectory-guard.*.json
+logs/
+
 # experiment logs
 wandb/
 *.log

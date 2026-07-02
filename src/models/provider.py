@@ -25,34 +25,45 @@ def _provider() -> str:
     return os.getenv("PROVIDER", "ollama").strip().lower()
 
 
-def get_llm(temperature: float = 0.0, max_tokens: int | None = None, model: str | None = None):
+def get_llm(temperature: float = 0.0, max_tokens: int | None = None, model: str | None = None,
+            num_ctx: int | None = None):
     """Return a LangChain chat model for the active PROVIDER.
 
     temperature 0.0 keeps code generation and diagnosis deterministic.
     max_tokens caps output, None means backend default.
     model overrides the env model id.
+    num_ctx (ollama only) raises the context window; ollama's default silently
+    truncates the oldest tokens on long prompts.
     """
     provider = _provider()
 
     if provider == "ollama":
         from langchain_ollama import ChatOllama
 
-        return ChatOllama(
+        kwargs = dict(
             model=model or os.getenv("OLLAMA_MODEL", "qwen2.5-coder:14b"),
             base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
             temperature=temperature,
             num_predict=max_tokens or -1,
         )
+        if num_ctx:
+            kwargs["num_ctx"] = num_ctx
+        return ChatOllama(**kwargs)
 
     if provider == "nim":
         from langchain_openai import ChatOpenAI
 
+        # NIM free tier sheds load with 429/5xx and a 550B generation can run
+        # for minutes: let the SDK retry fast transients and never kill a slow
+        # response client-side.
         return ChatOpenAI(
-            model=model or os.getenv("NIM_MODEL", "zai-org/glm-5.1"),
+            model=model or os.getenv("NIM_MODEL", "moonshotai/kimi-k2.6"),
             base_url=os.getenv("NIM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
             api_key=os.getenv("NIM_API_KEY"),
             temperature=temperature,
             max_tokens=max_tokens,
+            timeout=600.0,
+            max_retries=3,
         )
 
     if provider == "bedrock":
