@@ -33,7 +33,7 @@ An honest ablation: a **QLoRA-fine-tuned code LLM** (Qwen2.5-Coder, trained with
 | Orchestration | LangGraph |
 | Tools and prompts | LangChain |
 | Local model (dev) | qwen2.5-coder via Ollama |
-| Hosted models (eval) | DeepSeek-V4-Pro (workhorse) + 3 others A/B-tested via NVIDIA NIM; AWS Bedrock (phase 6) |
+| Hosted models (eval) | Claude Opus 4.6 via AWS Bedrock (frontier lane, 7/24 SWE-bench); DeepSeek-V4-Pro + 3 others A/B-tested via NVIDIA NIM |
 | Predictor | scikit-learn logistic regression (shipped) + unsloth LoRA ablation |
 | Sandbox | subprocess with timeout and resource limits |
 | Datasets | HumanEval, MBPP, SWE-bench Lite |
@@ -85,6 +85,13 @@ python -m eval.swebench_agent --repos pallets/flask,psf/requests --limit 24 --us
 python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Lite \
   --predictions_path swebench_preds/run.jsonl --max_workers 4 --run_id my-run --cache_level env
 python -m eval.ab_summary v2:deepseek v3:nemotron    # summarize harness reports
+
+# Phase 6 — Bedrock frontier lane + cross-model generalization
+python -m eval.swebench_agent --provider bedrock --model au.anthropic.claude-opus-4-6-v1 \
+  --repos pallets/flask,psf/requests,pydata/xarray,mwaskom/seaborn,pylint-dev/pylint \
+  --limit 24 --use-gold-file --max-file-chars 60000 --out swebench_preds/opus.jsonl
+python predictor/measure_transfer.py predictor/data/mbpp_nova.jsonl   # predictor trained on qwen, tested on Nova
+python predictor/measure_abort.py --pricing opus                      # abort savings in dollars
 ```
 
 ## Results
@@ -132,6 +139,19 @@ DeepSeek and Nemotron **tie**; per-attempt differences are within noise at n=24,
 
 A local qwen2.5-coder:14b pilot resolved 0/3 — it cannot reliably emit exact-match edits (an Ollama context-truncation bug, since fixed, also contributed).
 
+**SWE-bench Lite (Phase 6) — Bedrock frontier lane.** The same lean patcher, the same 24 instances, the same official harness, now on **Claude Opus 4.6 via AWS Bedrock** — one `PROVIDER` switch, zero graph changes (*same agent, three clouds*: local Ollama → NIM → Bedrock):
+
+| model | resolved | valid patches | per-attempt rate | API errors |
+|---|---|---|---|---|
+| **Opus 4.6 (Bedrock)** | **7/24 (29%)** | **23/24** | **30%** | 0 |
+| DeepSeek-V4-Pro (best of 4 on NIM) | 5/24 (21%) | 22/24 | 23% | 0 |
+
+Opus tops every axis, and **one frontier model alone (7) nearly matches the entire 4-model NIM union (8/24)**. Bedrock also erased the free-tier failure modes that dogged NIM — zero truncation, zero rate-limit storms, zero errors across 24 tasks, the reliability you pay for. The caveat is unchanged: this is the lean one-shot patcher with gold-file localization ("fix quality given the right file"), not the 70%+ that heavy agentic scaffolds reach. (Opus **4.8/4.7** were account-gated on a fresh Bedrock account — AWS Sales qualification — so 4.6 stands in at the same $5/$25 frontier tier.)
+
+**Generalization — does the predictor transfer across models?** Trained *only* on local `qwen2.5-coder:14b` trajectories, the failure predictor scores **Amazon Nova's** doomed MBPP runs at **0.926 AUROC, fully task-disjoint** (every one of the 150 test tasks removed from training; overlap-vs-disjoint AUROC differ by 0.001, so this is model-transfer, not task-recognition). Replayed on the real Nova run it catches **52/52 doomed, zero false aborts, −0% pass rate**, saving 26.6% of tokens at threshold 0.90. The predictor reads trajectory *dynamics*, not one model's fingerprints.
+
+**Cost-aware abort.** Priced through Bedrock's per-token rates, the ~27%-token policy scales with the cost of the model behind it: **$0.05 at Nova rates on a $0.19 benchmark, but $4.87 of a $17.83 run at Opus 4.8 rates.** The more capable the model, the more a "know when to quit" predictor is worth.
+
 ## Project status
 
 - [x] Phase 0: scaffold, pinned deps, sandbox runner
@@ -140,7 +160,7 @@ A local qwen2.5-coder:14b pilot resolved 0/3 — it cannot reliably emit exact-m
 - [x] Phase 3: failure predictor (feature logreg 0.806 AUROC; LoRA ablation)
 - [x] Phase 4: predict and abort edge (H3: ~27% tokens saved)
 - [x] Phase 5: SWE-bench Lite via the official harness + hosted 4-model A/B (NIM)
-- [ ] Phase 6: AWS Bedrock backend (third cloud lane)
+- [x] Phase 6: AWS Bedrock — Opus 4.6 frontier lane (7/24, best single model), cross-model generalization (0.926 AUROC), cost-aware abort
 
 ## Hypotheses
 

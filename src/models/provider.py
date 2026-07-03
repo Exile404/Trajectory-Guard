@@ -69,10 +69,14 @@ def get_llm(temperature: float = 0.0, max_tokens: int | None = None, model: str 
     if provider == "bedrock":
         from langchain_aws import ChatBedrockConverse
 
+        model_id = model or os.getenv("BEDROCK_MODEL_ID", "apac.amazon.nova-lite-v1:0")
+        # Opus 4.8 / Sonnet 5 (anthropic.*) reject temperature/top_p/top_k with a
+        # 400; omit temperature for them, keep it for Nova and everything else.
+        temp = None if "anthropic" in model_id.lower() else temperature
         return ChatBedrockConverse(
-            model=model or os.getenv("BEDROCK_MODEL_ID", "us.amazon.nova-lite-v1:0"),
-            region_name=os.getenv("AWS_REGION", "us-east-1"),
-            temperature=temperature,
+            model=model_id,
+            region_name=os.getenv("AWS_REGION", "ap-southeast-2"),
+            temperature=temp,
             max_tokens=max_tokens,
         )
 
