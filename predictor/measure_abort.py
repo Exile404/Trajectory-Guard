@@ -1,11 +1,12 @@
-"""H3: does early abort cut tokens without hurting pass rate?
+"""H3: does early abort cut tokens -- and dollars -- without hurting pass rate?
 
 Leak-free counterfactual replay on the logged trajectories. Each trajectory is
 scored by a logreg trained on OTHER tasks (out-of-fold GroupKFold), then the
-abort policy is applied — abort at the first in-progress step with
+abort policy is applied -- abort at the first in-progress step with
 P(doomed) >= threshold and step >= MIN_STEP. We compare tokens and pass rate
 against the full no-abort run, sweeping the threshold to show the operating
-curve. Tokens are cumulative per step in the logs, so aborting at step k costs
+curve, and price the saved tokens at a chosen backend's rate (see pricing.py).
+Tokens are cumulative per step in the logs, so aborting at step k costs
 tokens_used[k] and saves the rest.
 """
 
@@ -19,6 +20,7 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+import pricing
 from dataset import encode, load_records
 
 MIN_STEP = 2
@@ -85,25 +87,54 @@ def replay(recs, scores, threshold, min_step=MIN_STEP):
                 base_pass=base_pass, ab_pass=ab_pass)
 
 
-def main():
+def main(profile="nova-lite", input_frac=pricing.INPUT_FRAC):
     recs = load_records()
     print(f"records: {len(recs)}   tasks: {len({r['task_id'] for r in recs})}")
     scores = oof_scores(recs)
 
+    rate_m = pricing.rate_per_token(profile, input_frac) * 1_000_000
+    print(f"pricing: {profile}  (~${rate_m:.3f}/1M tok blended @ {input_frac:.0%} input)")
+
     base = replay(recs, scores, threshold=2.0)   # 2.0 > any prob => never abort
     bp = 100 * base["base_pass"] / base["n"]
     bt = base["base_tok"] / base["n"]
+    base_usd = pricing.cost(base["base_tok"], profile, input_frac)
+    print(f"baseline: {bp:.1f}% pass   {bt:.0f} tok/task   "
+          f"${base_usd:.4f} over {base['n']} tasks (never abort)")
+
     print(f"\n{'thresh':>7} | {'aborts':>6} | {'wrong':>5} | {'pass%':>6} | "
-          f"{'dpass':>6} | {'tok/task':>8} | {'saved%':>6}")
-    print(f"{'none':>7} | {0:>6} | {0:>5} | {bp:>5.1f}% | {'-':>6} | {bt:>8.0f} | {'-':>6}")
+          f"{'dpass':>6} | {'tok/task':>8} | {'saved%':>6} | {'$saved':>8}")
+    print(f"{'none':>7} | {0:>6} | {0:>5} | {bp:>5.1f}% | {'-':>6} | "
+          f"{bt:>8.0f} | {'-':>6} | {'-':>8}")
+
+    rows = {}
     for t in (0.70, 0.80, 0.90):
         r = replay(recs, scores, t)
+        rows[t] = r
         ap = 100 * r["ab_pass"] / r["n"]
         at = r["ab_tok"] / r["n"]
+        usd_saved = pricing.cost(r["base_tok"] - r["ab_tok"], profile, input_frac)
         print(f"{t:>7.2f} | {r['aborts']:>6} | {r['wrong']:>5} | {ap:>5.1f}% | "
-              f"{ap - bp:>+5.1f}% | {at:>8.0f} | {100 * (1 - at / bt):>5.1f}%")
-    print(f"\npositive=doomed; 'wrong'=runs aborted that would have passed; min_step={MIN_STEP}")
+              f"{ap - bp:>+5.1f}% | {at:>8.0f} | {100 * (1 - at / bt):>5.1f}% | "
+              f"${usd_saved:>7.4f}")
+
+    r = rows[0.90]
+    usd90 = pricing.cost(r["base_tok"] - r["ab_tok"], profile, input_frac)
+    pct90 = 100 * (1 - (r["ab_tok"] / r["n"]) / bt)
+    print(f"\nheadline @0.90: {pct90:.1f}% tokens saved = ${usd90:.4f} at {profile} "
+          f"rates over {r['n']} tasks, {r['wrong']} wrongful abort(s).")
+    print(f"positive=doomed; 'wrong'=runs aborted that would have passed; min_step={MIN_STEP}")
+    print(f"$saved blends input/output at {input_frac:.0%} input "
+          f"(logs store only total tokens); switch backends with --pricing.")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--pricing", default="nova-lite", choices=sorted(pricing.PRICES),
+                    help="which backend's rates to cost the saved tokens at")
+    ap.add_argument("--input-frac", type=float, default=pricing.INPUT_FRAC,
+                    help="assumed input-token fraction (logs store totals only)")
+    args = ap.parse_args()
+    main(profile=args.pricing, input_frac=args.input_frac)
