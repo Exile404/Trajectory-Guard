@@ -11,6 +11,7 @@ wrap the python call in firejail or a container. Enough for benchmark tasks.
 from __future__ import annotations
 
 import os
+import re
 import resource
 import signal
 import subprocess
@@ -42,12 +43,45 @@ def _limits(cpu_seconds: int, mem_bytes: int):
     return apply
 
 
+# The agent should only ever run pure functions. Refuse to execute a generation
+# that shells out, opens a socket, or touches the filesystem destructively, so a
+# stray or buggy generation can never delete the dataset or the repo. Override
+# with TG_SANDBOX_GUARD=0. (rlimits are not a jail — for hard isolation against
+# adversarial code run the whole process under firejail or in a container.)
+_DANGEROUS = re.compile(
+    r"\b(?:shutil|subprocess|socket)\b"
+    r"|\bos\.(?:system|popen|remove|unlink|rmdir|removedirs|rename|replace)\b"
+    r"|\brmtree\b|\brm\s+-rf\b"
+    r"|__import__\s*\(\s*['\"](?:os|subprocess|shutil|socket)"
+)
+
+
+def _dangerous_ops(code: str) -> list[str]:
+    return sorted({m.group(0) for m in _DANGEROUS.finditer(code)})
+
+
 def run_code(
     code: str,
     timeout: float = 10.0,
     mem_limit_mb: int = 2048,
     workdir: str | None = None,
+    guard: bool | None = None,
 ) -> ExecResult:
+    if guard is None:
+        guard = os.getenv("TG_SANDBOX_GUARD", "1") != "0"
+    if guard:
+        hits = _dangerous_ops(code)
+        if hits:
+            return ExecResult(
+                stdout="",
+                stderr=("SandboxGuard blocked: " + ", ".join(hits)
+                        + " — this agent runs pure functions only; "
+                        "set TG_SANDBOX_GUARD=0 to override."),
+                returncode=126,
+                timed_out=False,
+                duration=0.0,
+            )
+
     cpu_seconds = int(timeout) + 1
     mem_bytes = mem_limit_mb * 1024 * 1024
 
@@ -126,3 +160,6 @@ if __name__ == "__main__":
 
     tested = run_with_tests("def add(a, b):\n    return a + b", "assert add(2, 3) == 5")
     print("tested  :", tested.passed)
+
+    blocked = run_code("import shutil; shutil.rmtree('/tmp/x')")
+    print("guard   :", blocked.returncode, repr(blocked.stderr[:38]))

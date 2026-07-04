@@ -94,6 +94,32 @@ python predictor/measure_transfer.py predictor/data/mbpp_nova.jsonl   # predicto
 python predictor/measure_abort.py --pricing opus                      # abort savings in dollars
 ```
 
+## Demo
+
+Run the agent on your own task + test with [`graph/solve.py`](src/graph/solve.py) — it writes code, repairs on failure, and (with `--abort`) quits when the predictor judges the run doomed:
+
+```bash
+python -m graph.solve "Write is_prime(n) returning True if n is prime" \
+  --provider ollama --abort \
+  --test "assert is_prime(17) and not is_prime(15)"
+```
+
+A healthy run keeps its doom risk near zero and passes; a doomed run (here an unsatisfiable test) shows the risk climb step by step until the agent aborts and saves the rest of its budget:
+
+```
+[predict]  doom risk = 0.09
+   ...
+[predict]  doom risk = 0.95
+[abort]    predictor judged the run doomed -> stopping early
+verdict  : ABORTED   steps: 6   tokens: 1350
+```
+
+Full walkthrough with both real transcripts (healthy pass + doomed abort): **[demo.md](demo.md)**.
+
+## Safety
+
+The agent executes model-generated code, so the sandbox ([src/tools/sandbox.py](src/tools/sandbox.py)) runs it in an isolated temp dir with CPU / memory / file-size limits and a process-group kill on timeout. A **SandboxGuard** additionally refuses to execute any generation containing destructive or system calls (`rmtree`, `os.remove`, `subprocess`, `shutil`, sockets, `rm -rf`), so a stray generation cannot touch your files — override with `TG_SANDBOX_GUARD=0`. This stops accidental damage; for genuinely untrusted tasks, run the process under **firejail** or **Docker** (rlimits and the guard are defense-in-depth, not an escape-proof jail). Before pushing, `bash scripts/check_before_push.sh` verifies no secrets, dataset, or model weights are tracked.
+
 ## Results
 
 Harvested **3,556 trajectory steps across 1,128** HumanEval + MBPP tasks on `qwen2.5-coder:14b`.
