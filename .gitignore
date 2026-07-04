@@ -56,3 +56,6 @@ wandb/
 spec.md
 video_brief.md
 *.local.md
+blog/how-not-to-fool-yourself-5min.md
+.gitignore
+blog/how-not-to-fool-yourself.md
