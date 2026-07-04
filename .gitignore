@@ -52,5 +52,7 @@ logs/
 wandb/
 *.log
 
-# local only spec (not for the public repo)
+# local only spec and working notes (not for the public repo)
 spec.md
+video_brief.md
+*.local.md
